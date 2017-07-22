@@ -1,0 +1,595 @@
+<!DOCTYPE HTML>
+
+<html>
+  <head>
+    <title>Brown vs Webtext</title>
+
+    <style>
+    body {
+      margin: 0px;
+      padding: 0px;
+      font-family: sans-serif;
+      padding-bottom: 20px;
+    }
+
+    .header {
+      width:100%;
+      background-color: teal;
+      color:white;
+      position:fixed;
+      top:0;
+      left:0;
+      padding:10px;
+      box-sizing: border-box;
+      z-index: 10;
+    }
+
+    .container {
+      padding-top:100px;
+      width: 80%;
+      margin:auto;
+    }
+
+    .plot {
+      width: 40%;
+      font-size:large;
+      display: inline-block;
+      margin:10px;
+      line-height: 40px;
+    }
+
+    .right {
+      float:right;
+    }
+
+    .pos {
+      width:40px;
+      padding:2px;
+      margin:2px;
+      font-size:medium;
+      border: 1px black solid;
+      text-align: center;
+      display:block;
+    }
+
+    .pos.mini {
+      width:10px;
+      height:10px;
+      margin:0px;
+    }
+
+    .word {
+      text-align: center;
+      width: 100%;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .posWord.mini {
+      display: none;
+    }
+
+    .word.mini {
+      display: none;
+    }
+
+    .block {
+      display: inline-table;
+      padding: 10px;
+
+    }
+
+    .block.mini {
+      margin: 1px;
+      line-height: 0px;
+      padding: 2px;
+    }
+
+    a {
+      color:white;
+      text-decoration: none;
+    }
+
+    a:hover {
+      color:orange;
+    }
+
+    #filter {
+      background-color:teal;
+      padding: 10px;
+      padding-left: 20px;
+      padding-right: 20px;
+      width:auto;
+      position:fixed;
+      left: 50px;
+      top: 100px;
+      z-index: 9999999;
+    }
+    </style>
+
+    <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/qtip2/3.0.2/basic/jquery.qtip.css"/>
+    <link rel="stylesheet" type="text/css" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.6.1/css/font-awesome.min.css"/>
+
+    <script src="brown_model.js"></script>
+    <script src="web_model.js"></script>
+    <script src="https://code.jquery.com/jquery-2.2.3.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qtip2/3.0.2/basic/jquery.qtip.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js"></script>
+
+    <script>
+
+    var posLookUp = {"noun": "N", "adj": "Adj", "pron": "Prn",
+                     "num": "Num", "verb": "V", "adv": "Adv",
+                     "adp": "Prp", "det": "Det", "x": "X",
+                     ".": "Pnc", "conj": "Cnj", "prt": "Prt"};
+
+    var prevGram1 = null;
+    var prevGram2 = null;
+
+    var plotId = 0;
+
+    function plotGram(wordPos, prob, plot, data) {
+      var wordPos = wordPos.split("_");
+
+      var word = wordPos[0];
+      var pos = wordPos[1];
+
+      var wordHidden = $("#checkWord").is(":checked") ? "": " hidden";
+      wordHidden +=  $("#checkMini").is(":checked") ? " mini" : "";
+
+      var wordSpan = "<span class='word" + wordHidden + "'>" + word + "</span>";
+
+      var posSpan = "";
+
+      var tileHidden = $("#checkTile").is(":checked") ? "" : " hidden";
+
+      var opacity = $("#checkbox" + posLookUp[pos]).is(":checked") ? "" : " opacity:0.1"
+
+      var id = plot;
+
+      var posWord = $("#checkMini").is(":checked") ? "<span class='posWord mini'>": "<span class='posWord'>";
+      var mini = $("#checkMini").is(":checked") ? " mini" : "";
+
+
+      if (prob >= 0)
+        posSpan = "<span class='pos " + posLookUp[pos] + tileHidden + mini + "' style='background-color:rgba(0,0,255," + String(prob) + ");" + opacity + "'>" + posWord + posLookUp[pos] + "</span></span>";
+      else
+        posSpan = "<span class='pos " + posLookUp[pos] + tileHidden + mini + "' style='background-color:red;" + opacity + "'>" + posWord + posLookUp[pos] + "</span></span>";
+
+      var id = "id='block" + plotId + "'";
+
+      plot.append("<span class='block" + mini + "'" + id + ">" + wordSpan + posSpan + "</span>");
+
+      var content = "<div style='font-size:small; line-height:105%'><h3>Word " + data["index"] + "</h3>";
+      content += "<strong>Word: </strong>" + data["word"].split("_")[0] + "<br/>";
+      content += "<strong>POS: </strong>" + posLookUp[data["word"].split("_")[1]] + "<br/>";
+      content += "<strong>Probability: </strong>" + data["prob"] + "<br/>";
+      content += "<strong>Entropy: </strong>" + data["entropy"] + "<br/>";
+      content += "<strong>Possible Alternatives:</strong> ";
+
+      if (data["candidates"].length == 0)
+        content += "N/A";
+      else {
+        content += "<ul>";
+        for (var i = 0; i < data["candidates"].length; i++) {
+            content += "<li>" + data["candidates"][i][0] + " : " + posLookUp[data["candidates"][i][1]] + "</li>"
+        }
+        content += "</ul>"
+      }
+
+      content += "</div>";
+
+      $("#block" + plotId).qtip({
+        content: {
+          text: content
+        },
+        position: {
+          my: 'bottom left',
+          at: 'top left'
+        }
+      });
+
+      plotId++;
+    }
+
+    var plotIndex = 0;
+
+    function genBigram(prev, model, plot, index) {
+      if (prev == null) {
+        var firstKeys = Object.keys(model);
+        var i = firstKeys[Math.floor(Math.random() * firstKeys.length)];
+
+        var secondKeys = Object.keys(model[i]);
+        var j = secondKeys[Math.floor(Math.random() * secondKeys.length)];
+
+        var data1 = {"prob": "N/A", "index": index + 1, "word": i, "candidates": [], "entropy": "N/A"};
+        var data2 = {"prob": "N/A", "index": index + 1, "word": j, "candidates": [], "entropy": "N/A"};
+
+        plotGram(i, -1, plot, data1);
+        plotGram(j, -1, plot, data2);
+
+        return j;
+      } else {
+        if (!(prev in model)) {
+          // If a bigram is not found, scramble!
+          var firstKeys = Object.keys(model);
+          var i = firstKeys[Math.floor(Math.random() * firstKeys.length)];
+
+          var data = {"prob": "N/A", "index": index + 1, "word": i, "candidates": [], "entropy": "N/A"};
+          plotGram(i, -1, plot, data);
+          return i;
+
+        } else {
+          // Pick the best key!
+
+          var keys = Object.keys(model[prev]);
+          var sum = 0;
+
+          for (var i = 0; i < keys.length; i++) {
+            sum += model[prev][keys[i]];
+          }
+
+          var probs = [];
+
+          for (var i = 0; i < keys.length; i++) {
+            probs.push(model[prev][keys[i]] / sum);
+          }
+
+          // Sort the probability. We can use bubble sort since the list is small.
+          var i = 0;
+
+          while (i <= probs.length) {
+            var j = 0;
+
+            while (j <= probs.length) {
+              if (probs[i] < probs[j]) {
+                var temp = probs[i];
+                var temp2 = keys[i];
+
+                probs[i] = probs[j];
+                keys[i] = keys[j];
+
+                probs[j] = temp;
+                keys[j] = temp2;
+              }
+
+              j++;
+            }
+
+            i++;
+          }
+
+          // Compute entropy.
+          var H = 0;
+
+          for (var i = 0; i < probs.length; i++) {
+            H -= probs[i] * Math.log(probs[i]) / Math.LN10;
+          }
+
+          var cul = 0;
+          var roll = Math.random();
+          var rank = 0;
+
+          for (var i = 0; i < keys.length; i++) {
+            cul += probs[i];
+            rank++;
+
+            if (roll < cul) {
+              var candidates = [];
+              var prevJ = [];
+
+              while (candidates.length < keys.length - 1 && candidates.length < 5) {
+                var j = Math.floor(Math.random() * keys.length);
+
+                if (prevJ.indexOf(j) == -1 && j != i) {
+                  candidates.push([keys[j].split("_")[0], keys[j].split("_")[1]]);
+                  prevJ.push(j);
+                }
+              }
+
+              var data = {"prob": probs[i].toFixed(5), "index": index + 1, "word": keys[i], "candidates": candidates, "entropy": H.toFixed(2)};
+              plotGram(keys[i], probs[i], plot, data);
+              return keys[i];
+            }
+          }
+
+          var data = {"prob": "N/A", "index": index + 1, "word": keys[keys.length - 1], "candidates": [], "entropy": "N/A"};
+          plotGram(keys[keys.length - 1], -1, plot, data);
+          return keys[keys.length - 1];
+        }
+      }
+    }
+
+    var leftIndex = -1;
+    var rightIndex = -1;
+    var mini = false;
+
+    $(document).ready(function() {
+
+      $("#checkAuto").qtip({
+          content: {text: "<h3>Automatically add a word every 0.5 second.</h3>"},
+          position: {
+            my: 'top left',
+            at: 'bottom left'
+          }
+      });
+
+      $("#restartButton").qtip({
+          content: {text: "<h3>Scram the sentence generators. (For use when they are stuck.)</h3>"},
+          position: {
+            my: 'top left',
+            at: 'bottom left'
+          }
+      });
+
+      $("#checkWord").qtip({
+          content: {text: "<h3>Show words.</h3>"},
+          position: {
+            my: 'top left',
+            at: 'bottom left'
+          }
+      });
+
+      $("#checkTile").qtip({
+          content: {text: "<h3>Show tiles.</h3>"},
+          position: {
+            my: 'top left',
+            at: 'bottom left'
+          }
+      });
+
+      $("#checkMini").qtip({
+          content: {text: "<h3>Display small tiles.</h3>"},
+          position: {
+            my: 'top left',
+            at: 'bottom left'
+          }
+      });
+
+      $("#filterButton").qtip({
+          content: {text: "<h3>Set part-of-speech filter.</h3>"},
+          position: {
+            my: 'top left',
+            at: 'bottom left'
+          }
+      });
+
+      $("#legendButton").qtip({
+        content: {
+          text: "<h3>POS Abbrev.</h3>" +
+                "<ul>" +
+                "<li>N: Noun</li><li>Prn: Pronoun</li><li>Prn: Pronoun</li><li>Adj: Adjective</li><li>Num: Number</li><li>V: Verb</li>" +
+                "<li>Adv: Adverb</li><li>Prp: Preposition</li><li>Det: Determinant</li><li>Pnc: Punctuation</li><li>Prt: Particle</li>" +
+                "<li>Cnj: Conjunction</li><li>X: Misc./Unknown</li>" +
+                "</ul>" +
+                "<h3>Color</h3>" +
+                "<div style='text-align:left'>less probable</div>" +
+                "<div style='width:200px; height:10px; background: linear-gradient(to right, white, blue)'></div>" +
+                "<div style='text-align:right'>more probable</div>" +
+                "<i class='fa fa-exclamation-triangle' aria-hidden='true'></i> Red means unknown probability."
+        },
+        position: {
+          my: 'top left',
+          at: 'bottom left'
+        }
+      });
+
+      $("#filterCloseButton").click(function() {
+        $("#filter").addClass("hidden");
+      });
+
+      $("#filterButton").click(function() {
+        $("#filter").removeClass("hidden");
+      });
+
+      $("#genBigramButton").click(function() {
+        prevGram1 = genBigram(prevGram1, brownModel, $("#leftPlot"), leftIndex);
+        prevGram2 = genBigram(prevGram2, brownModel, $('#rightPlot'), rightIndex);
+
+        leftIndex++;
+        rightIndex++;
+        window.scrollTo(0,document.body.scrollHeight);
+      });
+
+      $("#restartButton").click(function() {
+        prevGram1 = null;
+        prevGram2 = null;
+
+        prevGram1 = genBigram(prevGram1, brownModel, $("#leftPlot"), leftIndex);
+        prevGram2 = genBigram(prevGram2, brownModel, $('#rightPlot'), rightIndex);
+
+        leftIndex++;
+        rightIndex++;
+        window.scrollTo(0,document.body.scrollHeight);
+      });
+
+      $("#checkWord").change(function() {
+        if ($(this).is(":checked")) {
+          $(".word").removeClass("hidden");
+        } else {
+          $(".word").addClass("hidden");
+        }
+      });
+
+      $("#checkTile").change(function() {
+        if ($(this).is(":checked")) {
+          $(".pos").removeClass("hidden");
+        } else {
+          $(".pos").addClass("hidden");
+        }
+      });
+
+      $("#checkboxN").change(function() {
+        if ($("#checkboxN").is(":checked")) {
+          $(".N").css('opacity', '1');
+        } else {
+          $(".N").css('opacity', '0.1');
+        }
+      });
+
+      $("#checkboxPrn").change(function() {
+        if ($("#checkboxPrn").is(":checked")) {
+          $(".Prn").css('opacity', '1');
+        } else {
+          $(".Prn").css('opacity', '0.1');
+        }
+      });
+
+      $("#checkboxAdj").change(function() {
+        if ($("#checkboxAdj").is(":checked")) {
+          $(".Adj").css('opacity', '1');
+        } else {
+          $(".Adj").css('opacity', '0.1');
+        }
+      });
+
+      $("#checkboxNum").change(function() {
+        if ($("#checkboxNum").is(":checked")) {
+          $(".Num").css('opacity', '1');
+        } else {
+          $(".Num").css('opacity', '0.1');
+        }
+      });
+
+      $("#checkboxV").change(function() {
+        if ($("#checkboxV").is(":checked")) {
+          $(".V").css('opacity', '1');
+        } else {
+          $(".V").css('opacity', '0.1');
+        }
+      });
+
+      $("#checkboxAdv").change(function() {
+        if ($("#checkboxAdv").is(":checked")) {
+          $(".Adv").css('opacity', '1');
+        } else {
+          $(".Adv").css('opacity', '0.1');
+        }
+      });
+
+      $("#checkboxPrp").change(function() {
+        if ($("#checkboxPrp").is(":checked")) {
+          $(".Prp").css('opacity', '1');
+        } else {
+          $(".Prp").css('opacity', '0.1');
+        }
+      });
+
+      $("#checkboxDet").change(function() {
+        if ($("#checkboxDet").is(":checked")) {
+          $(".Det").css('opacity', '1');
+        } else {
+          $(".Det").css('opacity', '0.1');
+        }
+      });
+
+      $("#checkboxPnc").change(function() {
+        if ($("#checkboxPnc").is(":checked")) {
+          $(".Pnc").css('opacity', '1');
+        } else {
+          $(".Pnc").css('opacity', '0.1');
+        }
+      });
+
+      $("#checkboxPrt").change(function() {
+        if ($("#checkboxPrt").is(":checked")) {
+          $(".Prt").css('opacity', '1');
+        } else {
+          $(".Prt").css('opacity', '0.1');
+        }
+      });
+
+      $("#checkboxCnj").change(function() {
+        if ($("#checkboxCnj").is(":checked")) {
+          $(".Cnj").css('opacity', '1');
+        } else {
+          $(".Cnj").css('opacity', '0.1');
+        }
+      });
+
+      $("#checkboxX").change(function() {
+        if ($("#checkboxX").is(":checked")) {
+          $(".X").css('opacity', '1');
+        } else {
+          $(".X").css('opacity', '0.1');
+        }
+      });
+
+      $("#checkMini").change(function() {
+        if ($("#checkMini").is(":checked")) {
+          $(".word").addClass("mini");
+          $(".posWord").addClass("mini");
+          $(".block").addClass("mini");
+          $(".pos").addClass("mini").removeClass("hidden");
+          $("#checkWord").prop("disabled", true);
+          $("#checkTile").prop("disabled", true).prop('checked', true);
+        } else {
+          $(".mini").removeClass("mini");
+          $("#checkWord").prop("disabled", false);
+          $("#checkTile").prop("disabled", false);
+        }
+      });
+
+      setInterval(function() {
+        if ($("#checkAuto").is(":checked")) {
+          prevGram1 = genBigram(prevGram1, brownModel, $("#leftPlot"), leftIndex);
+          prevGram2 = genBigram(prevGram2, brownModel, $('#rightPlot'), rightIndex);
+
+          leftIndex++;
+          rightIndex++;
+          window.scrollTo(0,document.body.scrollHeight);
+        }
+      }, 500);
+    });
+    </script>
+  </head>
+
+  <body>
+    <div class="header">
+      <a href="#" id="genBigramButton"><i class="fa fa-plus" aria-hidden="true"></i> ADD</a>
+      <input type="checkbox" id="checkAuto"><i class="fa fa-clock-o" aria-hidden="true"></i> AUTO ADD</input>
+
+      |
+
+      <a href="#" id="restartButton"><i class="fa fa-bolt" aria-hidden="true"></i> SCRAM</a>
+
+      ||
+
+      <span>VIEW:</span>
+      <input type="checkbox" id="checkWord" checked> <i class="fa fa-font" aria-hidden="true"></i> Show Word</input>
+      <input type="checkbox" id="checkTile" checked><i class="fa fa-th-large" aria-hidden="true"></i> Show Tile</input>
+      <input type="checkbox" id="checkMini"><i class="fa fa-th" aria-hidden="true"></i> Mini</input>
+
+      ||
+
+      <a href="#" id="filterButton"><i class="fa fa-filter" aria-hidden="true"></i> FILTER</a>
+
+      ||
+
+      <a href="#" id="legendButton"><i class="fa fa-list-ul" aria-hidden="true"></i> LEGEND</a>
+
+      <div id="filter" class="hidden">
+        <h2>Show or Hide | <a href="#" id="filterCloseButton"><i class="fa fa-times" aria-hidden="true"></i> </a> </h2>
+        <input id="checkboxN" class="posFilter" type="checkbox" checked>Noun</input><br/>
+        <input id="checkboxPrn" class="posFilter" type="checkbox" checked>Pronoun</input><br/>
+        <input id="checkboxAdj" class="posFilter" type="checkbox" checked>Adjective</input><br/>
+        <input id="checkboxNum" class="posFilter" type="checkbox" checked>Number</input><br/>
+        <input id="checkboxV" class="posFilter"  type="checkbox" checked>Verb</input><br/>
+        <input id="checkboxAdv" class="posFilter" type="checkbox" checked>Adverb</input><br/>
+        <input id="checkboxPrp" class="posFilter" type="checkbox" checked>Preposition</input><br/>
+        <input id="checkboxDet" class="posFilter" type="checkbox" checked>Determinant</input><br/>
+        <input id="checkboxPnc" class="posFilter" type="checkbox" checked>Punctuation</input><br/>
+        <input id="checkboxPrt" class="posFilter" type="checkbox" checked>Particle</input><br/>
+        <input id="checkboxCnj" class="posFilter" type="checkbox" checked>Conjunction</input><br/>
+        <input id="checkboxX" class="posFilter" type="checkbox" checked>Miscellaneous</input>
+      </div>
+    </div>
+
+    <div class="container">
+      <div id="leftPlot" class="plot left"><h1>Brown Corpus</h1></div>
+      <div id="rightPlot" class="plot right"><h1>Brown Corpus</h1></div>
+    </div>
+  </body>
+</html>
